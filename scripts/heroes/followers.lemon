@@ -1,0 +1,428 @@
+//# script-feature-level(2)
+
+//-------------------------------------------------------//
+// Followers                                             //
+//-------------------------------------------------------//
+
+constant u64 Heroes.SPRITE_TAG			= 0x4845524f00	// Base value for sprite tags, used for frame interpolation
+constant u16 Heroes.RENDER_QUEUE		= 0x9e80		// Just behind the leader and other objects with the same sprite priority
+
+
+function u32 Heroes.getFollowerAddress(u8 slot)
+{
+	return Heroes.FOLLOWER_BASE + u32(slot) * Heroes.FOLLOWER_SIZE
+}
+
+function u32 Heroes.getLastPositionAddress(u8 character)
+{
+	return Heroes.LAST_POSITIONS + u32(character) * 4
+}
+
+function u8 Heroes.getFollowerDelay(u8 slot)
+{
+	u8 spacing = clamp(Heroes.option.spacing, 2, 30)
+	return spacing * (slot + 1)
+}
+
+
+// Start over animations of a follower object (A0) for a new character
+function void Heroes.initFollowerObject(u8 character)
+{
+	zeroMemory(A0, Heroes.FOLLOWER_SIZE)
+	char.character = character
+	char.render_flags = render_flag.WORLD
+	char.state = char.state.STANDING
+	char.state.former = 0xff
+	heroes.follower.lastState = 0xff
+	heroes.follower.mode = follower_mode.TRAIL
+}
+
+
+// Put all followers next to the leader, e.g. at level start
+function void Heroes.resetFollowers()
+{
+	u32 leader = 0xffffb000
+	u8 leaderCharacter = u8[leader + 0x38]
+	u16 px = u16[leader + 0x10]
+	u16 py = u16[leader + 0x14]
+
+	u32 backupA0 = A0
+	for (u8 slot = 0; slot < Heroes.NUM_FOLLOWERS; ++slot)
+	{
+		A0 = Heroes.getFollowerAddress(slot)
+		Heroes.initFollowerObject(Heroes.getFollowerCharacter(leaderCharacter, slot))
+		heroes.follower.draw.x = px
+		heroes.follower.draw.y = py
+		heroes.follower.display.x = px
+	}
+	for (u8 character = 0; character < Heroes.TEAM_SIZE; ++character)
+	{
+		u32 address = Heroes.getLastPositionAddress(character)
+		u16[address] = px
+		u16[address + 2] = py
+	}
+	zeroMemory(Heroes.TAILS_TAILS_BASE, 0x4a)
+	A0 = backupA0
+}
+
+
+// After a leader switch, assign the new characters to the follower slots and let them move there smoothly
+function void Heroes.onLeaderChanged(u8 oldLeader, u8 newLeader)
+{
+	u32 leader = 0xffffb000
+	u32 address = Heroes.getLastPositionAddress(oldLeader)
+	u16[address] = u16[leader + 0x10]
+	u16[address + 2] = u16[leader + 0x14]
+
+	u32 backupA0 = A0
+	for (u8 slot = 0; slot < Heroes.NUM_FOLLOWERS; ++slot)
+	{
+		A0 = Heroes.getFollowerAddress(slot)
+		u8 character = Heroes.getFollowerCharacter(newLeader, slot)
+		if (char.character != character)
+		{
+			Heroes.initFollowerObject(character)
+			if (character == CHARACTER_TAILS)
+				zeroMemory(Heroes.TAILS_TAILS_BASE, 0x4a)
+
+			// Start from where this character was shown last
+			address = Heroes.getLastPositionAddress(character)
+			heroes.follower.draw.x = u16[address]
+			heroes.follower.draw.y = u16[address + 2]
+			heroes.follower.blend.x = u16[address]
+			heroes.follower.blend.y = u16[address + 2]
+			heroes.follower.blend.timer = Heroes.BLEND_FRAMES
+			heroes.follower.display.x = u16[address]
+		}
+	}
+	A0 = backupA0
+}
+
+
+// Translate a state of the leader into one that makes sense for a follower of any character
+function u8 Heroes.mapFollowerState(u8 state, u8 leaderCharacter, bool inAir)
+{
+	// Balancing only looks right at the exact position of the leader
+	if (state == char.state.BALANCING1 || state == char.state.BALANCING2)
+		return char.state.STANDING
+
+	// Generic states that all three characters share
+	if (state < char.state.TRANSFORMING && state != char.state.DISAPPEARED && state != char.state.DIED && state != char.state.DROWNED && state != char.state.DIED_GREY)
+		return state
+
+	// Character-specific states
+	if (leaderCharacter == CHARACTER_SONIC && state == char.state.SONIC_HANGON)
+		return char.state.HANGING
+	if (leaderCharacter == CHARACTER_KNUCKLES && (state == char.state.KNUX_STANDUP || state == char.state.KNUX_STANDUP2))
+		return char.state.STANDING
+
+	// Flying, gliding, climbing, drop dash: just curl up while in the air
+	return inAir ? char.state.ROLLING : char.state.RUNNING
+}
+
+
+function bool Heroes.isLeaderFlyingWithTeam()
+{
+	if (Heroes.option.teamFlight == 0)
+		return false
+	u32 leader = 0xffffb000
+	if (u8[leader + 0x38] != CHARACTER_TAILS)
+		return false
+	if ((u8[leader + 0x2a] & char.flag.IN_AIR) == 0)
+		return false
+	return Heroes.isTailsFlightState(u8[leader + 0x20])
+}
+
+
+// Update the follower object in A0 for the given slot
+function void Heroes.updateFollower(u8 slot, bool teamFlight)
+{
+	u32 leader = 0xffffb000
+	u8 leaderFlags = u8[leader + 0x2a]
+	u16 leaderX = u16[leader + 0x10]
+	u16 leaderY = u16[leader + 0x14]
+
+	u32 entry = Heroes.getTrailEntry(Heroes.getFollowerDelay(slot))
+	u8 info = u8[entry + Heroes.trail.INFO]
+
+	u8 newMode = teamFlight ? follower_mode.HANGING : follower_mode.TRAIL
+	if (newMode != heroes.follower.mode)
+	{
+		heroes.follower.mode = newMode
+		heroes.follower.blend.x = heroes.follower.draw.x
+		heroes.follower.blend.y = heroes.follower.draw.y
+		heroes.follower.blend.timer = Heroes.BLEND_FRAMES
+		heroes.follower.display.x = u16[entry + Heroes.trail.X]
+		heroes.follower.offset.x = 0
+	}
+
+	u16 targetX
+	u16 targetY
+	u8 state
+	u8 flags
+
+	if (newMode == follower_mode.HANGING)
+	{
+		// Hanging on to flying Tails, the second follower holds on to the first one
+		u16 offsetY = Heroes.HANG_OFFSET_TAILS + ((slot > 0) ? Heroes.HANG_OFFSET_CHAIN : 0)
+		targetX = leaderX
+		targetY = global.inv_gravity ? (leaderY - offsetY) : (leaderY + offsetY)
+		state = (char.character == CHARACTER_SONIC) ? char.state.SONIC_HANGON : char.state.HANGING
+		flags = (leaderFlags & (char.flag.FACING_LEFT | char.flag.UNDERWATER)) | char.flag.IN_AIR
+		char.groundspeed = 0
+		char.rotation = 0
+		char.rotation.x = 0
+		char.flags2d = 0
+		char.velocity.x = s16[leader + 0x18]
+		char.velocity.y = s16[leader + 0x1a]
+		heroes.follower.visible = (u8[leader + 0x20] != char.state.DISAPPEARED)
+		heroes.follower.priority = (u16[leader + 0x0a] & sprite_attribute.PRIORITY) ? 1 : 0
+	}
+	else
+	{
+		// Replaying the leader's movement from a few frames ago
+		targetX = u16[entry + Heroes.trail.X]
+		targetY = u16[entry + Heroes.trail.Y]
+		flags = u8[entry + Heroes.trail.FLAGS]
+		bool inAir = (flags & char.flag.IN_AIR) != 0
+		u8 entryCharacter = (info & trail_info.CHARACTER) >> 4
+		state = Heroes.mapFollowerState(u8[entry + Heroes.trail.STATE], entryCharacter, inAir)
+		char.groundspeed = s16[entry + Heroes.trail.GROUNDSPEED]
+		char.rotation = u8[entry + Heroes.trail.ROTATION]
+		char.rotation.x = u8[entry + Heroes.trail.ROTATION_X]
+		char.flags2d = u8[entry + Heroes.trail.FLAGS2D]
+		char.velocity.x = s16[entry + Heroes.trail.VELOCITY_X]
+		char.velocity.y = s16[entry + Heroes.trail.VELOCITY_Y]
+		heroes.follower.visible = (info & trail_info.VISIBLE) ? 1 : 0
+		heroes.follower.priority = (info & trail_info.PRIORITY) ? 1 : 0
+
+		// When the leader stands still, line up next to it instead of all standing on the same spot
+		s16 baseX = s16(targetX)
+		s16 previousX = s16(heroes.follower.display.x)
+		s16 displayX = baseX
+		bool leaderIdle = ((leaderFlags & char.flag.IN_AIR) == 0 && s16[leader + 0x1c] == 0)
+		bool lineUp = false
+		if (leaderIdle && !inAir)
+		{
+			// Followers stand behind the leader, never in front of it
+			s16 direction = (leaderFlags & char.flag.FACING_LEFT) ? -1 : 1
+			s16 wantedX = s16(leaderX) - direction * Heroes.IDLE_GAP * s16(slot + 1)
+			s16 lineX = (direction > 0) ? min(baseX, wantedX) : max(baseX, wantedX)
+			displayX = previousX + clamp(lineX - previousX, -Heroes.WALK_SPEED, Heroes.WALK_SPEED)
+			lineUp = (displayX != baseX)
+		}
+		else
+		{
+			// Get back onto the trail smoothly after lining up
+			//  -> The offset is relative to the trail, so this works at any speed
+			s16 offset = clamp(heroes.follower.offset.x, -Heroes.CATCH_UP_MAX, Heroes.CATCH_UP_MAX)
+			offset = (offset > 0) ? max(offset - Heroes.CATCH_UP_SPEED, 0) : min(offset + Heroes.CATCH_UP_SPEED, 0)
+			displayX = baseX + offset
+		}
+		heroes.follower.display.x = u16(displayX)
+		heroes.follower.offset.x = displayX - baseX
+		targetX = u16(displayX)
+
+		if (displayX != baseX && !inAir)
+		{
+			s16 movement = displayX - previousX
+			if (movement != 0)
+			{
+				// Walking to its place in the line, or catching up
+				state = char.state.RUNNING
+				flags = (flags & ~(char.flag.FACING_LEFT | char.flag.IN_AIR | char.flag.ROLLING | char.flag.PUSHING)) | ((movement < 0) ? char.flag.FACING_LEFT : 0)
+				char.groundspeed = (movement < 0) ? -0x280 : 0x280
+				char.rotation = 0
+			}
+			else if (lineUp)
+			{
+				// Standing in the line, doing the same as the leader (incl. looking up or ducking)
+				u8 leaderState = u8[leader + 0x20]
+				state = (leaderState == char.state.LOOKING_UP || leaderState == char.state.COWERING) ? leaderState : char.state.STANDING
+				flags = (flags & ~(char.flag.FACING_LEFT | char.flag.IN_AIR | char.flag.ROLLING | char.flag.PUSHING)) | (leaderFlags & char.flag.FACING_LEFT)
+				char.groundspeed = 0
+				char.rotation = 0
+			}
+		}
+	}
+
+	if (state != heroes.follower.lastState)
+	{
+		// Only take over state changes, so that animation scripts can switch states on their own
+		heroes.follower.lastState = state
+		char.state = state
+	}
+	char.flags = flags
+	char.bonus_effect = 0
+
+	// Animation, using the game's own animation functions
+	A2 = A0
+	if (char.character == CHARACTER_SONIC)
+	{
+		UpdateSonicAnimation()
+	}
+	else if (char.character == CHARACTER_TAILS)
+	{
+		UpdateTailsAnimation()
+	}
+	else
+	{
+		UpdateKnucklesAnimation()
+	}
+	if (global.inv_gravity)
+	{
+		char.render_flags ^= render_flag.FLIP_Y
+	}
+
+	// Position, with blending after mode or leader changes
+	if (heroes.follower.blend.timer > 0)
+	{
+		--heroes.follower.blend.timer
+		s32 t = heroes.follower.blend.timer
+		s32 dx = s16(heroes.follower.blend.x - targetX)
+		s32 dy = Heroes.getWrappedDeltaY(heroes.follower.blend.y, targetY)
+		targetX += s16(dx * t / Heroes.BLEND_FRAMES)
+		targetY += s16(dy * t / Heroes.BLEND_FRAMES)
+	}
+	char.position.x.u16 = targetX
+	char.position.y.u16 = targetY
+	heroes.follower.draw.x = targetX
+	heroes.follower.draw.y = targetY
+
+	u32 address = Heroes.getLastPositionAddress(char.character)
+	u16[address] = targetX
+	u16[address + 2] = targetY
+
+	// No duplicate Tails when the game shows its own AI Tails (e.g. at the start of Carnival Night)
+	if (char.character == CHARACTER_TAILS && u32[0xffffb04a] != 0)
+		heroes.follower.visible = 0
+
+	if (char.character == CHARACTER_TAILS)
+	{
+		Heroes.updateFollowerTailsTails(A0)
+	}
+}
+
+
+// Animation of Tails' tails for a follower Tails, see "TailsTails.Update"
+function void Heroes.updateFollowerTailsTails(u32 parent)
+{
+	u32 backupA0 = A0
+	A0 = Heroes.TAILS_TAILS_BASE
+	A2 = parent
+
+	objA0.position.x.u16 = u16[A2 + 0x10]
+	objA0.position.y.u16 = u16[A2 + 0x14]
+	u8[A0 + 0x26] = u8[A2 + 0x26]			// Rotation
+	objA0.flags2a = u8[A2 + 0x2a]			// Flags
+
+	D0 = u8[A2 + 0x20]
+	if ((u8[A2 + 0x2a] & char.flag.PUSHING) && level.HCZ_water_current_flags.tails == 0)
+	{
+		if (u8[A2 + 0x22] >= 0xa9 && u8[A2 + 0x22] <= 0xac)
+		{
+			D0 = 4
+		}
+	}
+	if (u8[A0 + 0x34] != D0.u8)
+	{
+		u8[A0 + 0x34] = D0.u8
+		objA0.state = u8[0x016164 + D0.s16]
+	}
+
+	A1 = 0x016196
+	UpdateTailsAnimation_inner()
+	if (global.inv_gravity && objA0.state != 0x03)
+	{
+		objA0.render_flags ^= render_flag.FLIP_Y
+	}
+	A0 = backupA0
+}
+
+
+// Called once per frame after player 1 got updated, with A0 = 0xffffb000
+function void Heroes.updateFollowers()
+{
+	bool teamFlight = Heroes.isLeaderFlyingWithTeam()
+	u8 leaderCharacter = char.character
+
+	u32 backupA0 = A0
+	for (u8 slot = 0; slot < Heroes.NUM_FOLLOWERS; ++slot)
+	{
+		A0 = Heroes.getFollowerAddress(slot)
+		u8 character = Heroes.getFollowerCharacter(leaderCharacter, slot)
+		if (char.character != character)
+		{
+			// Should not happen, but better be safe
+			Heroes.initFollowerObject(character)
+		}
+		Heroes.updateFollower(slot, teamFlight)
+	}
+	A0 = backupA0
+
+	// The leader is shown at its own position
+	u32 address = Heroes.getLastPositionAddress(leaderCharacter)
+	u16[address] = char.position.x.u16
+	u16[address + 2] = char.position.y.u16
+}
+
+
+
+//-------------------------------------------------------//
+// Rendering                                             //
+//-------------------------------------------------------//
+
+function void Heroes.renderFollowers()
+{
+	// Hide the whole team when the leader died
+	if (u8[0xffffb000 + 0x05] >= base_state.DIED)
+		return
+
+	u32 backupA0 = A0
+
+	// Draw the second follower first, so the first one is in front of it
+	for (s8 slot = Heroes.NUM_FOLLOWERS - 1; slot >= 0; --slot)
+	{
+		A0 = Heroes.getFollowerAddress(slot)
+		if (heroes.follower.visible == 0)
+			continue
+
+		s16 px = heroes.follower.draw.x - camera.foreground.x.u16
+		s16 py = Heroes.getWrappedDeltaY(heroes.follower.draw.y, camera.foreground.y.u16)
+		if (px < -0x40 || px > s16(getScreenWidth()) + 0x40 || py < -0x40 || py > s16(getScreenHeight()) + 0x40)
+			continue
+
+		u8 character = char.character
+		u8 flags = char.render_flags & (SPRITE_FLAG_FLIP_X | SPRITE_FLAG_FLIP_Y)
+		if (heroes.follower.priority)
+			flags |= SPRITE_FLAG_PRIO
+		u8 atex = 0x40 + character * 0x20
+		u16 renderQueue = Heroes.RENDER_QUEUE - u16(slot) * 4
+
+		Renderer.setSpriteTagWithPosition(Heroes.SPRITE_TAG + u64(slot) * 2, px, py)
+
+		u16 animationSpriteEx = Standalone.getModdedAnimationSpriteEx(character, char.animation.sprite)
+		Standalone.drawCharacterSpriteDirect(character, px, py, animationSpriteEx, flags, atex, renderQueue)
+
+		if (character == CHARACTER_TAILS)
+		{
+			// Tails' tails, behind Tails himself
+			Renderer.setSpriteTagWithPosition(Heroes.SPRITE_TAG + u64(slot) * 2 + 1, px, py)
+			u8 sprite = u8[Heroes.TAILS_TAILS_BASE + 0x22]
+			u8 tailsFlags = u8[Heroes.TAILS_TAILS_BASE + 0x04] & (SPRITE_FLAG_FLIP_X | SPRITE_FLAG_FLIP_Y)
+			if (heroes.follower.priority)
+				tailsFlags |= SPRITE_FLAG_PRIO
+
+			u64 key = stringformat(stringformat("%s_tails_0x%02x", getCharacterSpriteKey(CHARACTER_TAILS)), sprite)
+			if (!Renderer.hasCustomSprite(key))
+			{
+				key = Renderer.setupCustomCharacterSprite(0x336620, 0x344d74, 0x344bb8, sprite, 0x00)
+			}
+			Renderer.drawSprite(key, px, py, atex, tailsFlags, renderQueue - 1)
+		}
+
+		Renderer.clearSpriteTag()
+	}
+
+	A0 = backupA0
+}

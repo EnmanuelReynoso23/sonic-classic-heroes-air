@@ -1,0 +1,353 @@
+//# script-feature-level(2)
+
+//-------------------------------------------------------//
+// Team order and general queries                        //
+//-------------------------------------------------------//
+
+// Team order as in Sonic Classic Heroes: Speed -> Flight -> Power -> Speed
+function u8 Heroes.getNextCharacter(u8 character)
+{
+	return (character == CHARACTER_SONIC) ? CHARACTER_TAILS : (character == CHARACTER_TAILS) ? CHARACTER_KNUCKLES : CHARACTER_SONIC
+}
+
+function u8 Heroes.getPreviousCharacter(u8 character)
+{
+	return (character == CHARACTER_SONIC) ? CHARACTER_KNUCKLES : (character == CHARACTER_TAILS) ? CHARACTER_SONIC : CHARACTER_TAILS
+}
+
+// Character of the follower in the given slot (0 = directly behind the leader)
+function u8 Heroes.getFollowerCharacter(u8 leader, u8 slot)
+{
+	u8 character = Heroes.getNextCharacter(leader)
+	if (slot > 0)
+		character = Heroes.getNextCharacter(character)
+	return character
+}
+
+// Update addresses of the three characters (see "Character.BaseUpdate.*")
+//  -> These functions are overridden in this mod, so "addressof" can't be used for them here
+constant u32 Heroes.UPDATE_ADDRESS_SONIC	= 0x010a94
+constant u32 Heroes.UPDATE_ADDRESS_TAILS	= 0x01365c
+constant u32 Heroes.UPDATE_ADDRESS_KNUCKLES	= 0x016444
+
+function bool Heroes.isPlayerCharacterObject(u32 address)
+{
+	u32 updateAddress = u32[address]
+	return (updateAddress == Heroes.UPDATE_ADDRESS_SONIC || updateAddress == Heroes.UPDATE_ADDRESS_TAILS || updateAddress == Heroes.UPDATE_ADDRESS_KNUCKLES)
+}
+
+// Zones where the team is allowed
+function bool Heroes.isTeamZone()
+{
+	// Everything up to Death Egg, plus Lava Reef boss act and Hidden Palace
+	//  -> Not in Doomsday, the ending, competition mode zones and bonus stages
+	return (global.zone <= 0x0b || global.zone == 0x16 || global.zone == 0x17)
+}
+
+// Is the team mode active right now?
+function bool Heroes.isActive()
+{
+	if (Heroes.option.enabled == 0)
+		return false
+	if (competition_mode.active)
+		return false
+	if (global.game_mode != 0x0c)
+		return false
+	if (!Heroes.isTeamZone())
+		return false
+	if (debug_mode.state != 0)
+		return false
+	return Heroes.isPlayerCharacterObject(0xffffb000)
+}
+
+// The character that belongs to the story, i.e. the one selected in the data select
+function u8 Heroes.getStoryCharacter()
+{
+	return getMainCharacter()
+}
+
+function u8 Heroes.getWantedLeader()
+{
+	return (Heroes.wantedLeader == 0) ? Heroes.getStoryCharacter() : (Heroes.wantedLeader - 1)
+}
+
+
+
+//-------------------------------------------------------//
+// Leader switching                                      //
+//-------------------------------------------------------//
+
+function bool Heroes.isTailsFlightState(u8 state)
+{
+	return (state == char.state.TAILS_FLYDOWN || state == char.state.TAILS_FLYUP || state == char.state.TAILS_FLYTIRED || state == char.state.TAILS_SWIMDOWN || state == char.state.TAILS_SWIMUP || state == char.state.TAILS_SWIMTIRED)
+}
+
+// Is the leader (A0 = player 1) in a situation where the character can be changed safely?
+function bool Heroes.canSwitchLeaderNow()
+{
+	if (char.base_state != base_state.NORMAL)
+		return false
+	if (char.control_flags != 0)
+		return false
+	if (player1.control_override != 0)
+		return false
+	if (Game.isInSkippableCutscene())
+		return false
+	if (super.active != 0 || super.active.tails != 0)
+		return false
+	if (global.level_started == 0)
+		return false
+	if (char.spindash != 0)
+		return false
+
+	// A real second character is around (e.g. AI Tails flying Sonic into Carnival Night)
+	if (u32[0xffffb04a] != 0)
+		return false
+
+	bool inAir = (char.flags & char.flag.IN_AIR) != 0
+	if (inAir)
+	{
+		if (Heroes.airSwaps >= Heroes.MAX_AIR_SWAPS)
+			return false
+	}
+	else
+	{
+		// Only on more or less flat ground, as the hitbox height can change
+		if (abs(s8(char.rotation)) > 0x18)
+			return false
+	}
+
+	u8 state = char.state
+	if (char.character == CHARACTER_TAILS && Heroes.isTailsFlightState(state))
+		return true
+	if (char.double_jump_state != 0)
+		return false
+	if (char.character == CHARACTER_SONIC && state == char.state.SONIC_DROPDASH)
+		return true
+	if (char.character == CHARACTER_TAILS && state == char.state.TAILS_RUNNING3)
+		return true
+
+	// Generic states only
+	return (state <= char.state.COWERING || state == char.state.BALANCING2 || state == char.state.BRAKING || state == char.state.STRAIGHTJUMP || state == char.state.BREATHE)
+}
+
+
+function void Heroes.setupDustCloud(u32 address)
+{
+	// Dust cloud / water splash effect object for player 1
+	//  -> Sonic & Knuckles use the object at 0xffffcc54, Tails uses 0xffffcc9e (see "Character.BaseUpdate.*")
+	u32 backupA0 = A0
+	zeroMemory(address, 0x4a)
+	u32[address] = 0x018b3e
+	A0 = address
+	fn018b54()
+
+	// Make sure it refers to player 1 in any case
+	objA0.dustcloud.character_address = 0xb000
+	objA0.dustcloud.targetInVRAM = DustCloud.targetInVRAM
+	objA0.sprite_attributes = (DustCloud.targetInVRAM >> 5)
+	A0 = backupA0
+}
+
+
+// Change the character of player 1 (A0 = 0xffffb000) in place, keeping position, speed and state
+function void Heroes.setLeaderCharacter(u8 newCharacter)
+{
+	u8 oldCharacter = char.character
+	if (newCharacter == oldCharacter)
+		return
+
+	bool inAir = (char.flags & char.flag.IN_AIR) != 0
+
+	// Convert character-specific states into generic ones
+	u8 state = char.state
+	if (state >= char.state.TRANSFORMING)
+	{
+		if (inAir)
+		{
+			// Curl up into a ball, so the new leader can directly use its own ability
+			state = char.state.ROLLING
+			char.flags |= char.flag.ROLLING
+			char.jumping = 1
+		}
+		else
+		{
+			state = char.state.RUNNING
+		}
+	}
+	char.state = state
+	char.state.former = 0xff		// Force a restart of the animation
+	char.animation.frame = 0
+	char.animation.timer = 0
+	char.double_jump_state = 0
+	u8[A0 + 0x25] = 0				// sonic.dropdash_counter / tails.flight_countdown / knuckles.glide_direction
+
+	// Hitbox
+	u8 defaultHeight = (newCharacter == CHARACTER_TAILS) ? char.hitbox.y.UPRIGHT_TAILS : char.hitbox.y.UPRIGHT
+	char.hitbox.default.x = char.hitbox.x.UPRIGHT
+	char.hitbox.default.y = defaultHeight
+	if (char.flags & char.flag.ROLLING)
+	{
+		char.hitbox_extends.x = char.hitbox.x.ROLLING
+		char.hitbox_extends.y = char.hitbox.y.ROLLING
+	}
+	else
+	{
+		// Keep the feet on the ground when the height changes
+		s16 heightDifference = s16(char.hitbox_extends.y) - s16(defaultHeight)
+		char.hitbox_extends.x = char.hitbox.x.UPRIGHT
+		char.hitbox_extends.y = defaultHeight
+		if (!inAir)
+		{
+			char.position.y.u16 += global.inv_gravity ? -heightDifference : heightDifference
+		}
+	}
+
+	// Character identity
+	char.character = newCharacter
+	if (newCharacter == CHARACTER_SONIC)
+	{
+		char.update_address = Heroes.UPDATE_ADDRESS_SONIC
+		char.mapping_offset = 0x146620
+	}
+	else if (newCharacter == CHARACTER_TAILS)
+	{
+		char.update_address = Heroes.UPDATE_ADDRESS_TAILS
+		char.mapping_offset = 0x148eb8
+	}
+	else
+	{
+		char.update_address = Heroes.UPDATE_ADDRESS_KNUCKLES
+		char.mapping_offset = 0x14a8d6
+	}
+
+	u16 targetInVRAM = (newCharacter == CHARACTER_TAILS) ? Char.Tails.targetInVRAM : Char.Player1.targetInVRAM
+	char.sprite_attributes = (char.sprite_attributes & sprite_attribute.PRIORITY) | (targetInVRAM >> 5)
+	char.animation.sprite.backup = 0xff			// Force reload of sprite patterns
+	char.animation.sprite.backup.tails = 0xff
+
+	// Speed caps: Tails uses his own set of values
+	if (newCharacter == CHARACTER_TAILS)
+	{
+		setSpeedCapProperties(addressof(global.move.speedcap.tails), false)
+		camera.yoffset.tails = camera.yoffset.player
+	}
+	else
+	{
+		setSpeedCapProperties(addressof(global.move.speedcap), false)
+		if (oldCharacter == CHARACTER_TAILS)
+			camera.yoffset.player = camera.yoffset.tails
+	}
+
+	// Helper objects
+	if (newCharacter == CHARACTER_TAILS)
+	{
+		// Tails' tails
+		zeroMemory(0xffffcc0a, 0x4a)
+		u32[0xffffcc0a] = addressof(TailsTails.Init)
+		u16[0xffffcc0a + 0x30] = 0xb000
+
+		// No AI for Tails as player 1
+		tails.ai_routine = 0
+		tails.control_counter = 0
+
+		Heroes.setupDustCloud(0xffffcc9e)
+	}
+	else
+	{
+		if (oldCharacter == CHARACTER_TAILS)
+		{
+			zeroMemory(0xffffcc0a, 0x4a)
+		}
+		if (u32[0xffffcc54] == 0)
+		{
+			Heroes.setupDustCloud(0xffffcc54)
+		}
+	}
+
+	if (newCharacter == CHARACTER_SONIC && u32[0xffffcce8] == 0)
+	{
+		// Insta-Shield, in case there's no shield at the moment
+		u32[0xffffcce8] = addressof(InstaShield.Init)
+		u16[0xffffcce8 + 0x42] = 0xb000
+	}
+
+	Heroes.onLeaderChanged(oldCharacter, newCharacter)
+}
+
+
+// Called once per frame after player 1 got updated, with A0 = 0xffffb000
+function void Heroes.updateLeader()
+{
+	if (Heroes.swapCooldown > 0)
+		--Heroes.swapCooldown
+
+	if ((char.flags & char.flag.IN_AIR) == 0)
+		Heroes.airSwaps = 0
+
+	// During story cutscenes, the story character has to be the leader
+	if (Game.isInSkippableCutscene())
+	{
+		u8 storyCharacter = Heroes.getStoryCharacter()
+		if (char.character != storyCharacter && char.base_state == base_state.NORMAL)
+		{
+			Heroes.setLeaderCharacter(storyCharacter)
+		}
+		return
+	}
+
+	if (!Heroes.canSwitchLeaderNow())
+		return
+
+	// Player input
+	u8 input = 0
+	if (Heroes.swapCooldown == 0)
+	{
+		if (Input.buttonPressed(BUTTON_R))
+		{
+			input = 1
+		}
+		else if (Input.buttonPressed(BUTTON_L))
+		{
+			input = 2
+		}
+		else if (Heroes.option.swapButton != 1 && Input.buttonPressed(BUTTON_Y))
+		{
+			// Y in the air is used for Super transformations, so only use it there if explicitly selected
+			if ((char.flags & char.flag.IN_AIR) == 0 || Heroes.option.swapButton == 2)
+				input = 1
+		}
+	}
+
+	if (input != 0)
+	{
+		u8 newLeader = (input == 1) ? Heroes.getNextCharacter(char.character) : Heroes.getPreviousCharacter(char.character)
+		Heroes.wantedLeader = newLeader + 1
+		Heroes.swapCooldown = Heroes.SWAP_COOLDOWN
+		if (char.flags & char.flag.IN_AIR)
+			++Heroes.airSwaps
+		Heroes.setLeaderCharacter(newLeader)
+		playSound(SFX_CLICK)
+		return
+	}
+
+	// Restore the chosen leader, e.g. after a cutscene or at the start of a level
+	u8 wantedLeader = Heroes.getWantedLeader()
+	if (char.character != wantedLeader && (char.flags & char.flag.IN_AIR) == 0)
+	{
+		Heroes.setLeaderCharacter(wantedLeader)
+	}
+}
+
+
+// Called at level start, after the characters got spawned
+function void Heroes.onLevelInit()
+{
+	Heroes.trailValid = false
+	Heroes.swapCooldown = 0
+	Heroes.airSwaps = 0
+	if (Heroes.option.keepLeader == 0)
+	{
+		Heroes.wantedLeader = 0
+	}
+}

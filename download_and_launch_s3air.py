@@ -1,111 +1,84 @@
 #!/usr/bin/env python3
 """
-🚀 Sonic 3 A.I.R. Portable Setup & Launcher
-Permite descargar, configurar y ejecutar Sonic 3 A.I.R. en modo desarrollador
-con el mod Sonic Classic Heroes AIR preinstalado y activo.
+Sonic 3 A.I.R. - descarga, instalacion del mod y arranque.
+
+1. Busca Sonic3AIR.exe; si no esta, descarga la ultima version estable oficial
+   desde https://github.com/Eukaryot/sonic3air/releases (Windows 64 bits).
+2. Enlaza este mod en %APPDATA%\\Sonic3AIR\\mods (install_mod_to_s3air.py).
+3. Abre el juego.
+
+La ROM no se descarga: Sonic 3 A.I.R. necesita tu propia copia de
+"Sonic 3 & Knuckles" (Sonic_Knuckles_wSonic3.bin, p. ej. la de Steam).
+La primera vez que abras el juego te la pide.
 """
 
+import json
 import os
-import sys
-import zipfile
-import urllib.request
 import subprocess
+import sys
+import urllib.request
+import zipfile
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
-PORTABLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sonic3air")
 MOD_DIR = os.path.dirname(os.path.abspath(__file__))
+GAME_DIR = os.path.join(os.path.dirname(MOD_DIR), "sonic3air")
+RELEASES_API = "https://api.github.com/repos/Eukaryot/sonic3air/releases/latest"
+ASSET_NAME = "sonic3air_game_64bit.zip"
 
-def check_existing_install():
-    possible_paths = [
-        os.path.join(PORTABLE_DIR, "Sonic3AIR.exe"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Sonic3AIR\Sonic3AIR.exe"),
-        os.path.expandvars(r"%ProgramFiles%\Sonic3AIR\Sonic3AIR.exe"),
+
+def find_game():
+    candidates = [
+        os.path.join(GAME_DIR, "Sonic3AIR.exe"),
+        os.path.join(GAME_DIR, "sonic3air_game", "Sonic3AIR.exe"),
+        os.path.expandvars(r"%USERPROFILE%\sonic-dev\game\sonic3air_game\Sonic3AIR.exe"),
     ]
-    for p in possible_paths:
-        if os.path.exists(p):
-            return p
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
     return None
 
-def download_sonic3air():
-    print(f"📦 Descargando Sonic 3 A.I.R. (Portable Windows)...")
-    url = "https://github.com/Eukaryot/sonic3air/releases/download/v24.02.02.0/sonic3air_game.zip"
-    zip_path = os.path.join(os.path.dirname(PORTABLE_DIR), "sonic3air_game.zip")
-    
-    os.makedirs(os.path.dirname(PORTABLE_DIR), exist_ok=True)
-    
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    req = urllib.request.Request(url, headers=headers)
-    
-    try:
-        with urllib.request.urlopen(req) as resp, open(zip_path, "wb") as out_file:
-            total_size = int(resp.info().get('Content-Length', 0))
-            downloaded = 0
-            while True:
-                chunk = resp.read(65536)
-                if not chunk:
-                    break
-                out_file.write(chunk)
-                downloaded += len(chunk)
-                if total_size > 0:
-                    pct = (downloaded / total_size) * 100
-                    print(f"\rProgreso: {pct:.1f}% ({downloaded // (1024*1024)} MB)", end="")
-        print("\n✅ Descarga completada.")
-    except Exception as e:
-        print(f"\n❌ Error durante la descarga automática: {e}")
-        print("💡 Puedes descargar 'sonic3air_game.zip' manualmente desde https://sonic3air.org/")
+
+def download_game():
+    print("Buscando la ultima version estable de Sonic 3 A.I.R....")
+    request = urllib.request.Request(RELEASES_API, headers={"User-Agent": "sonic-classic-heroes-air"})
+    with urllib.request.urlopen(request) as response:
+        release = json.load(response)
+
+    asset = next((a for a in release.get("assets", []) if a["name"] == ASSET_NAME), None)
+    if asset is None:
+        print(f"No se encontro {ASSET_NAME} en {release.get('tag_name')}. Descargalo a mano desde https://sonic3air.org")
         return None
 
-    print(f"📂 Extrayendo en: {PORTABLE_DIR}...")
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(PORTABLE_DIR)
-        os.remove(zip_path)
-        print("✅ Extracción exitosa.")
-        return os.path.join(PORTABLE_DIR, "Sonic3AIR.exe")
-    except Exception as e:
-        print(f"❌ Error al descomprimir: {e}")
-        return None
+    os.makedirs(GAME_DIR, exist_ok=True)
+    zip_path = os.path.join(GAME_DIR, ASSET_NAME)
+    print(f"Descargando {release['tag_name']} ({asset['size'] // (1024 * 1024)} MB)...")
+    urllib.request.urlretrieve(asset["browser_download_url"], zip_path)
 
-def link_mod_to_portable(exe_path):
-    portable_base = os.path.dirname(exe_path)
-    mods_target = os.path.join(portable_base, "data", "mods", "sonic-classic-heroes-air")
-    os.makedirs(os.path.dirname(mods_target), exist_ok=True)
+    with zipfile.ZipFile(zip_path) as archive:
+        archive.extractall(GAME_DIR)
+    os.remove(zip_path)
+    return find_game()
 
-    if not os.path.exists(mods_target):
-        try:
-            cmd = f'cmd /c mklink /J "{mods_target}" "{MOD_DIR}"'
-            subprocess.run(cmd, shell=True, capture_output=True)
-            print("✅ Mod enlazado directamente a la versión portátil.")
-        except Exception:
-            pass
 
 def main():
-    print("=" * 65)
-    print("  🦔 Sonic 3 A.I.R. - Lanzador de Sonic Classic Heroes")
-    print("=" * 65)
+    exe = find_game() or download_game()
+    if exe is None:
+        return 1
+    print(f"Juego: {exe}")
 
-    exe_path = check_existing_install()
-    if not exe_path:
-        print("🔍 No se detectó instalación previa en rutas habituales.")
-        exe_path = download_sonic3air()
+    # Enlazar el mod en la carpeta de mods del juego
+    subprocess.run([sys.executable, os.path.join(MOD_DIR, "install_mod_to_s3air.py")], check=False)
 
-    if exe_path and os.path.exists(exe_path):
-        print(f"🎮 Ejecutable localizado: {exe_path}")
-        link_mod_to_portable(exe_path)
-        
-        print("\n🚀 Lanzando Sonic 3 A.I.R. en modo desarrollador...")
-        print("   (Presiona Ctrl+C en esta terminal para detener si lo deseas)")
-        subprocess.Popen([exe_path, "--developer"], cwd=os.path.dirname(exe_path))
-    else:
-        print("⚠️ No se pudo iniciar Sonic 3 A.I.R.")
-        print("Por favor, asegúrate de colocar Sonic3AIR.exe en:")
-        print(f"   {PORTABLE_DIR}")
+    print("Abriendo Sonic 3 A.I.R....")
+    print("Activa el mod en el menu principal -> Mods, si todavia no lo esta.")
+    subprocess.Popen([exe], cwd=os.path.dirname(exe))
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

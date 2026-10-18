@@ -1,61 +1,25 @@
+//# script-feature-level(2)
+
 // ==============================================================================
-// 🦔 Sonic Classic Heroes AIR - Main Entry Point
+//  Sonic Classic Heroes AIR
 // ==============================================================================
-// Sistema de 3 personajes simultáneos (Team Sonic y Team Chaotix) con
-// cambio de líder en tiempo real para Sonic 3 A.I.R.
+//  Brings the team system of Sonic Classic Heroes to Sonic 3 & Knuckles:
+//  Sonic, Tails and Knuckles travel together, and the player switches the
+//  leader at any time (Speed -> Flight -> Power).
+//
+//  How it works:
+//   - The leader is always the real player 1 object (0xffffb000), with the full
+//     original physics, abilities and object interactions of that character.
+//     Switching the leader changes that object's character in place.
+//   - The two other team members follow the leader by replaying the leader's
+//     recent movement, using the game's own animation code and sprites.
+//   - The story stays the one of the character selected in the data select.
 // ==============================================================================
 
-// Constantes de tipos de formación
-constant u8 HERO_SPEED = 0    // Sonic / Espio
-constant u8 HERO_FLY   = 1    // Tails / Charmy
-constant u8 HERO_POWER = 2    // Knuckles / Vector
 
-// Constantes de equipos
-constant u8 TEAM_SONIC   = 0  // Sonic, Tails, Knuckles
-constant u8 TEAM_CHAOTIX = 1  // Espio, Charmy, Vector
-
-// Estado global de Sonic Classic Heroes
-global u8  heroes.current_team       = TEAM_SONIC
-global u8  heroes.current_leader     = HERO_SPEED
-global u8  heroes.prev_leader        = HERO_SPEED
-global u32 heroes.char3_slot         = 0xffffb094    // Ranura de memoria para el 3er personaje
-global u8  heroes.swap_cooldown      = 0
-global bool heroes.team_initialized  = false
-
-// ------------------------------------------------------------------------------
-// Inicialización del equipo al comenzar nivel o reaparecer
-// ------------------------------------------------------------------------------
-function void Heroes.InitTeam()
-{
-    heroes.current_leader = HERO_SPEED
-    heroes.prev_leader = HERO_SPEED
-    heroes.swap_cooldown = 0
-    heroes.team_initialized = true
-    
-    // Forzar que el juego sepa que hay compañeros activos
-    // global.characters: 1 = Sonic, 2 = Tails, 3 = Knuckles, 4 = Sonic & Tails
-    // Para Classic Heroes configuramos soporte multi-entidad
-}
-
-// Hook al iniciar un nuevo acto o nivel
-//# address-hook(0x006780) end(0x006900)
-function void LevelSetup.InitializeCharacters()
-{
-    base.LevelSetup.InitializeCharacters()
-    Heroes.InitTeam()
-    Heroes.SpawnThirdCharacter()
-}
-
-// Hook al bucle de actualización de físicas y personajes por fotograma
-//# address-hook(0x010a00) end(0x010b20)
-function void Character.BaseUpdate()
-{
-    base.Character.BaseUpdate()
-
-    // Solo ejecutar en el objeto principal (Player 1) para no triplicar llamadas
-    if (A0 == 0xffffb000)
-    {
-        Heroes.UpdateTeamMechanics()
-    }
-}
-
+include heroes/defines
+include heroes/team
+include heroes/trail
+include heroes/followers
+include heroes/hud
+include heroes/hooks

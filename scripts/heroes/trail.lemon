@@ -1,0 +1,95 @@
+//# script-feature-level(2)
+
+//-------------------------------------------------------//
+// Leader trail                                          //
+//-------------------------------------------------------//
+
+// The trail is a ring buffer with one entry per frame, describing where the leader was and what it did.
+// Followers replay it with a delay, similar to how the original game's AI Tails replays Sonic's movement.
+
+function u32 Heroes.getTrailEntry(u8 framesAgo)
+{
+	u8 index = (Heroes.trailHead - framesAgo) & Heroes.TRAIL_MASK
+	return Heroes.TRAIL_BASE + u32(index) * 0x10
+}
+
+// Vertical distance, taking into account vertically wrapping levels
+function s16 Heroes.getWrappedDeltaY(u16 y1, u16 y0)
+{
+	s16 dy = y1 - y0
+	if (level.vertical_wrap == 0xff00)
+	{
+		dy &= level.height.bitmask
+		if (dy > level.height.bitmask / 2)
+			dy -= (level.height.bitmask + 1)
+	}
+	return dy
+}
+
+// Write the current state of the leader (A0 = player 1) into a trail entry
+function void Heroes.writeTrailEntry(u32 entry)
+{
+	u8 info = (char.character << 4) & trail_info.CHARACTER
+	if (char.sprite_attributes & sprite_attribute.PRIORITY)
+		info |= trail_info.PRIORITY
+
+	// Invisible while e.g. inside a cannon or tube, or after dying
+	if (char.state != char.state.DISAPPEARED && char.base_state < base_state.DIED)
+		info |= trail_info.VISIBLE
+
+	u16[entry + Heroes.trail.X]			 = char.position.x.u16
+	u16[entry + Heroes.trail.Y]			 = char.position.y.u16
+	u8[entry + Heroes.trail.STATE]		 = char.state
+	u8[entry + Heroes.trail.FLAGS]		 = char.flags
+	s16[entry + Heroes.trail.GROUNDSPEED] = char.groundspeed
+	u8[entry + Heroes.trail.ROTATION]	 = char.rotation
+	u8[entry + Heroes.trail.ROTATION_X]	 = char.rotation.x
+	u8[entry + Heroes.trail.FLAGS2D]	 = char.flags2d
+	u8[entry + Heroes.trail.INFO]		 = info
+	s16[entry + Heroes.trail.VELOCITY_X] = char.velocity.x
+	s16[entry + Heroes.trail.VELOCITY_Y] = char.velocity.y
+}
+
+// Fill the whole trail with the leader standing at its current position
+function void Heroes.resetTrail()
+{
+	for (u8 i = 0; i < Heroes.TRAIL_LENGTH; ++i)
+	{
+		u32 entry = Heroes.TRAIL_BASE + u32(i) * 0x10
+		Heroes.writeTrailEntry(entry)
+
+		// Standing still, so followers don't show running or falling animations
+		u8[entry + Heroes.trail.STATE] = char.state.STANDING
+		u8[entry + Heroes.trail.FLAGS] = char.flags & (char.flag.FACING_LEFT | char.flag.UNDERWATER)
+		s16[entry + Heroes.trail.GROUNDSPEED] = 0
+		s16[entry + Heroes.trail.VELOCITY_X] = 0
+		s16[entry + Heroes.trail.VELOCITY_Y] = 0
+		u8[entry + Heroes.trail.ROTATION] = 0
+	}
+	Heroes.trailHead = 0
+	Heroes.trailValid = true
+	Heroes.resetFollowers()
+}
+
+// Called once per frame after player 1 got updated, with A0 = 0xffffb000
+function void Heroes.updateTrail()
+{
+	if (!Heroes.trailValid)
+	{
+		Heroes.resetTrail()
+		return
+	}
+
+	// Check for teleports, like the seamless transitions between acts
+	u32 last = Heroes.getTrailEntry(0)
+	s16 dx = char.position.x.u16 - u16[last + Heroes.trail.X]
+	s16 dy = Heroes.getWrappedDeltaY(char.position.y.u16, u16[last + Heroes.trail.Y])
+	if (abs(dx) >= Heroes.TELEPORT_DISTANCE || abs(dy) >= Heroes.TELEPORT_DISTANCE)
+	{
+		Heroes.resetTrail()
+		return
+	}
+
+	Heroes.trailHead = (Heroes.trailHead + 1) & Heroes.TRAIL_MASK
+	Heroes.writeTrailEntry(Heroes.getTrailEntry(0))
+}

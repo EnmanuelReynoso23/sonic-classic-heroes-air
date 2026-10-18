@@ -1,0 +1,101 @@
+//# script-feature-level(2)
+
+//-------------------------------------------------------//
+// Mod settings (see "Settings" in mod.json)             //
+//-------------------------------------------------------//
+
+global u8 Heroes.option.enabled			// 0 = off, 1 = team mode active
+global u8 Heroes.option.swapButton		// 0 = R / L, plus Y on the ground; 1 = only R / L; 2 = Y also in the air
+global u8 Heroes.option.spacing			// Delay in frames between team members
+global u8 Heroes.option.teamFlight		// 1 = followers hang on to Tails while he flies
+global u8 Heroes.option.keepLeader		// 1 = keep the chosen leader across zones and after dying
+global u8 Heroes.option.showHud			// 1 = draw the team indicator below the rings counter
+
+
+
+//-------------------------------------------------------//
+// State                                                 //
+//-------------------------------------------------------//
+
+global u8  Heroes.wantedLeader			// Leader chosen by the player, as character + 1 (0 = nothing chosen yet)
+global u8  Heroes.trailHead				// Index of the newest entry in the leader trail
+global bool Heroes.trailValid			// False until the trail got filled for the current level
+global u8  Heroes.swapCooldown			// Frames until the next leader switch is allowed
+global u8  Heroes.airSwaps				// Leader switches done since the leader left the ground
+global u16 Heroes.lastUpdateFrame		// Value of level.framecounter of the last follower update
+
+
+
+//-------------------------------------------------------//
+// Constants                                             //
+//-------------------------------------------------------//
+
+constant u8 Heroes.TEAM_SIZE			= 3
+constant u8 Heroes.NUM_FOLLOWERS		= 2
+constant u8 Heroes.SWAP_COOLDOWN		= 12
+constant u8 Heroes.MAX_AIR_SWAPS		= 2		// Allows e.g. Sonic jump -> Tails flight -> Knuckles glide, but no endless flight
+constant u8 Heroes.BLEND_FRAMES			= 10	// Frames for a follower to move into a new position after a switch
+constant s16 Heroes.IDLE_GAP			= 18	// Horizontal distance between team members while standing
+constant s16 Heroes.WALK_SPEED			= 3		// Speed of followers walking to their place in the line, in pixels per frame
+constant s16 Heroes.CATCH_UP_SPEED		= 4		// Speed of followers getting back onto the trail
+constant s16 Heroes.CATCH_UP_MAX		= 0x60	// Followers never lag behind the trail by more than this
+constant u16 Heroes.TELEPORT_DISTANCE	= 0x100	// Leader movement in one frame that resets the trail (e.g. act transitions)
+
+constant u16 Heroes.HANG_OFFSET_TAILS	= 0x1c	// Same as the game uses for Tails carrying Sonic
+constant u16 Heroes.HANG_OFFSET_CHAIN	= 0x22	// Second follower hangs on to the first one's feet
+
+
+
+//-------------------------------------------------------//
+// Memory layout                                         //
+//-------------------------------------------------------//
+
+// Uses the shared memory region 0x800000 .. 0x8fffff of S3AIR, in a part not used by the base game
+
+// Leader trail: ring buffer of 64 entries with 0x10 bytes each, one entry per frame
+constant u32 Heroes.TRAIL_BASE			= 0x830000
+constant u8  Heroes.TRAIL_LENGTH		= 64
+constant u8  Heroes.TRAIL_MASK			= 0x3f
+
+	// Offsets inside a trail entry
+	constant u8 Heroes.trail.X			= 0x00	// u16
+	constant u8 Heroes.trail.Y			= 0x02	// u16
+	constant u8 Heroes.trail.STATE		= 0x04	// u8, leader's char.state
+	constant u8 Heroes.trail.FLAGS		= 0x05	// u8, leader's char.flags
+	constant u8 Heroes.trail.GROUNDSPEED	= 0x06	// s16
+	constant u8 Heroes.trail.ROTATION	= 0x08	// u8
+	constant u8 Heroes.trail.ROTATION_X	= 0x09	// u8
+	constant u8 Heroes.trail.FLAGS2D		= 0x0a	// u8
+	constant u8 Heroes.trail.INFO		= 0x0b	// u8, see trail_info.* below
+	constant u8 Heroes.trail.VELOCITY_X	= 0x0c	// s16
+	constant u8 Heroes.trail.VELOCITY_Y	= 0x0e	// s16
+
+	constant u8 trail_info.VISIBLE		= 0x01
+	constant u8 trail_info.PRIORITY		= 0x02	// Leader's sprite priority flag
+	constant u8 trail_info.CHARACTER	= 0x30	// Leader's character, shifted by 4 bits
+
+// Followers: each one is a fake character object, so the game's own animation functions can work on it
+constant u32 Heroes.FOLLOWER_BASE		= 0x830400
+constant u32 Heroes.FOLLOWER_SIZE		= 0x60
+
+// Fake object for the follower version of Tails' tails (only one follower can be Tails at a time)
+constant u32 Heroes.TAILS_TAILS_BASE	= 0x830500
+
+// Last drawn position of each character (u16 x, u16 y), used to blend positions after switching the leader
+constant u32 Heroes.LAST_POSITIONS		= 0x830560
+
+	// Additional follower fields, after the usual character object fields (0x00 .. 0x49)
+	define heroes.follower.visible		=  u8[A0 + 0x4a]	// Drawn in this frame
+	define heroes.follower.priority		=  u8[A0 + 0x4b]	// Use sprite priority flag
+	define heroes.follower.lastState	=  u8[A0 + 0x4c]	// State last taken from the trail
+	define heroes.follower.display.x	= u16[A0 + 0x4e]	// Horizontal position before blending, can differ from the trail while lining up
+	define heroes.follower.draw.x		= u16[A0 + 0x50]	// Position where the follower gets drawn
+	define heroes.follower.draw.y		= u16[A0 + 0x52]
+	define heroes.follower.blend.x		= u16[A0 + 0x54]	// Position where the follower started blending from
+	define heroes.follower.blend.y		= u16[A0 + 0x56]
+	define heroes.follower.blend.timer	=  u8[A0 + 0x58]
+	define heroes.follower.mode			=  u8[A0 + 0x59]	// See follower_mode.* below
+	define heroes.follower.offset.x		= s16[A0 + 0x5a]	// Difference between display position and trail position
+
+	constant u8 follower_mode.TRAIL		= 0x00	// Replaying the leader's movement
+	constant u8 follower_mode.HANGING	= 0x01	// Hanging on to flying Tails

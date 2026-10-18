@@ -1,0 +1,141 @@
+//# script-feature-level(2)
+
+//-------------------------------------------------------//
+// Overrides of base game functions                      //
+//-------------------------------------------------------//
+
+// Character selection at level start
+function void SetGlobalCharacters()
+{
+	base.SetGlobalCharacters()
+
+	if (Heroes.option.enabled && competition_mode.active == 0)
+	{
+		// The team brings its own Tails, so play the story of the selected main character alone
+		if (global.characters == CHARS_SONIC_AND_TAILS)
+			global.characters = CHARS_SONIC_ALONE
+		useKnucklesAndTails = false
+	}
+}
+
+
+// Spawning of the characters when a level starts or restarts
+function void InitializeGameCharacters()
+{
+	base.InitializeGameCharacters()
+	Heroes.onLevelInit()
+}
+
+
+// Player 1 update for each of the three characters
+function void Character.BaseUpdate.Sonic()
+{
+	base.Character.BaseUpdate.Sonic()
+	Heroes.afterCharacterUpdate()
+}
+
+function void Character.BaseUpdate.Tails()
+{
+	base.Character.BaseUpdate.Tails()
+	Heroes.afterCharacterUpdate()
+}
+
+function void Character.BaseUpdate.Knuckles()
+{
+	base.Character.BaseUpdate.Knuckles()
+	Heroes.afterCharacterUpdate()
+}
+
+
+function void Heroes.afterCharacterUpdate()
+{
+	// Only for player 1, as the Tails update is also used for the AI Tails at 0xffffb04a
+	if (A0 != 0xffffb000)
+		return
+
+	if (!Heroes.isActive())
+	{
+		Heroes.trailValid = false
+		return
+	}
+
+	// Only once per frame
+	if (Heroes.trailValid && level.framecounter == Heroes.lastUpdateFrame)
+		return
+	Heroes.lastUpdateFrame = level.framecounter
+
+	// The object update loop relies on A0 and D7 staying the same, so better back up all registers
+	pushAll()
+	Heroes.updateLeader()
+	A0 = 0xffffb000
+	Heroes.syncCameraOffset()
+	Heroes.updateTrail()
+	Heroes.updateFollowers()
+	popAll()
+}
+
+
+// The camera uses the look up / down offset of the story character, so keep it in sync with the leader's
+function void Heroes.syncCameraOffset()
+{
+	bool storyIsTails = isMainCharacter(CHARACTER_TAILS)
+	if (char.character == CHARACTER_TAILS && !storyIsTails)
+	{
+		camera.yoffset.player = camera.yoffset.tails
+	}
+	else if (char.character != CHARACTER_TAILS && storyIsTails)
+	{
+		camera.yoffset.tails = camera.yoffset.player
+	}
+}
+
+
+// Sprite rendering, once per frame
+function void RenderSprites()
+{
+	base.RenderSprites()
+
+	if (Heroes.isActive() && Heroes.trailValid)
+	{
+		pushAll()
+		Heroes.renderFollowers()
+		Heroes.renderTeamHud()
+		popAll()
+	}
+}
+
+
+// Tails as team leader is controlled by the player, so he has to be able to fly even if he's not the story character
+function void TailsPressedJumpInMidAir()
+{
+	if (A0 == 0xffffb000 && !isMainCharacter(CHARACTER_TAILS) && Heroes.isActive())
+	{
+		// Same as the original for a player-controlled Tails
+		if (Game.getSetting(SETTING_CANCEL_FLIGHT) && (control.tails.state & CONTROL_DOWN))
+			return
+
+		TailsStartFlight()
+		return
+	}
+
+	base.TailsPressedJumpInMidAir()
+}
+
+
+// When Tails as team leader dies, it must be handled like player 1 dying, not like the AI sidekick that just respawns
+function void Character.CheckDiedStateEnd()
+{
+	if (A0 == 0xffffb000 && char.character == CHARACTER_TAILS && !isMainCharacter(CHARACTER_TAILS) && Heroes.option.enabled && competition_mode.active == 0)
+	{
+		char.character = getMainCharacter()
+		base.Character.CheckDiedStateEnd()
+		if (char.base_state != base_state.INACTIVE)
+		{
+			// Not done yet, still falling off the screen
+			char.character = CHARACTER_TAILS
+		}
+		return
+	}
+
+	base.Character.CheckDiedStateEnd()
+}

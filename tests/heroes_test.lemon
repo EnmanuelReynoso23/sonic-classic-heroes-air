@@ -1,0 +1,322 @@
+//# script-feature-level(2)
+
+// Simulation tests for Sonic Classic Heroes AIR
+//  -> Not part of the mod itself; these are run by "tools/run_tests.sh" with the lemoncheck simulator,
+//     which executes the scripts with simulated memory (there's no ROM, so animation tables read as zeros)
+
+
+function void Test.expect(bool condition, string message)
+{
+	if (!condition)
+		Sim.fail(message)
+}
+
+function void Test.expectEqual(s32 actual, s32 expected, string message)
+{
+	if (actual != expected)
+	{
+		Sim.log("  actual", actual)
+		Sim.log("  expected", expected)
+		Sim.fail(message)
+	}
+}
+
+function u32 Test.follower(u8 slot)
+{
+	return Heroes.getFollowerAddress(slot)
+}
+
+function s32 Test.followerX(u8 slot)
+{
+	return u16[Test.follower(slot) + 0x50]
+}
+
+function s32 Test.followerY(u8 slot)
+{
+	return u16[Test.follower(slot) + 0x52]
+}
+
+function u8 Test.followerCharacter(u8 slot)
+{
+	return u8[Test.follower(slot) + 0x38]
+}
+
+function u8 Test.followerState(u8 slot)
+{
+	return u8[Test.follower(slot) + 0x20]
+}
+
+
+function void Test.setupLevel()
+{
+	global.game_mode = 0x0c
+	global.zone_act = 0x0100		// Hydrocity 1
+	global.characters = CHARS_SONIC_ALONE
+	competition_mode.active = 0
+	debug_mode.state = 0
+	global.level_started = 1
+	global.inv_gravity = 0
+	player1.control_override = 0
+	level.vertical_wrap = 0
+	level.framecounter = 1
+	camera.foreground.x.u16 = 0x0f40
+	camera.foreground.y.u16 = 0x0380
+
+	Heroes.option.enabled = 1
+	Heroes.option.swapButton = 0
+	Heroes.option.spacing = 8
+	Heroes.option.teamFlight = 1
+	Heroes.option.keepLeader = 1
+	Heroes.option.showHud = 1
+	Heroes.wantedLeader = 0
+
+	A0 = 0xffffb000
+	zeroMemory(A0, 0x4a)
+	char.update_address = Heroes.UPDATE_ADDRESS_SONIC
+	char.character = CHARACTER_SONIC
+	char.base_state = base_state.NORMAL
+	char.position.x.u16 = 0x1000
+	char.position.y.u16 = 0x0400
+	char.hitbox_extends.x = char.hitbox.x.UPRIGHT
+	char.hitbox_extends.y = char.hitbox.y.UPRIGHT
+	char.state = char.state.STANDING
+	char.flags = 0
+
+	// Sonic's helper objects as spawned by "InitializeGameCharacters"
+	u32[0xffffcc54] = 0x018b3e
+	u32[0xffffcce8] = 0x0194ce
+
+	Heroes.onLevelInit()
+}
+
+// One game frame: player 1 moves by (dx, dy), then the mod updates and renders
+function void Test.frame(s16 dx, s16 dy)
+{
+	A0 = 0xffffb000
+	char.position.x.u16 += dx
+	char.position.y.u16 += dy
+	Heroes.afterCharacterUpdate()
+	A0 = 0xffffb000
+	Heroes.renderFollowers()
+	++level.framecounter
+}
+
+function void Test.frames(u16 count, s16 dx, s16 dy)
+{
+	for (u16 i = 0; i < count; ++i)
+		Test.frame(dx, dy)
+}
+
+function void Test.pressButton(u8 button)
+{
+	Sim.setButtonsPressed(u32(1) << button)
+	Test.frame(0, 0)
+	Sim.setButtonsPressed(0)
+}
+
+
+function void Test.run()
+{
+	// --- Standing at level start: the team lines up behind Sonic ---
+	Test.setupLevel()
+	Test.frames(40, 0, 0)
+	Test.expectEqual(Test.followerCharacter(0), CHARACTER_TAILS, "Follower 0 should be Tails behind Sonic")
+	Test.expectEqual(Test.followerCharacter(1), CHARACTER_KNUCKLES, "Follower 1 should be Knuckles behind Sonic")
+	Test.expectEqual(Test.followerX(0), 0x1000 - 18, "Tails should line up 18 pixels behind")
+	Test.expectEqual(Test.followerX(1), 0x1000 - 36, "Knuckles should line up 36 pixels behind")
+	Test.expectEqual(Test.followerY(0), 0x0400, "Tails at the same height")
+	Sim.log("standing: follower 0 x", Test.followerX(0))
+	Sim.log("standing: follower 1 x", Test.followerX(1))
+
+	// --- Running right at 6 pixels per frame: followers replay the trail with 8 / 16 frames delay ---
+	A0 = 0xffffb000
+	char.state = char.state.RUNNING
+	char.groundspeed = 0x600
+	Test.frames(60, 6, 0)
+	A0 = 0xffffb000
+	s32 leaderX = char.position.x.u16
+	Sim.log("running: leader x", leaderX)
+	Sim.log("running: follower 0 x", Test.followerX(0))
+	Sim.log("running: follower 1 x", Test.followerX(1))
+	Test.expectEqual(Test.followerX(0), leaderX - 6 * 8, "Tails should be 8 frames behind while running")
+	Test.expectEqual(Test.followerX(1), leaderX - 6 * 16, "Knuckles should be 16 frames behind while running")
+	Test.expectEqual(Test.followerState(0), char.state.RUNNING, "Tails should be running")
+
+	// --- Stopping: they line up again, without passing the leader ---
+	A0 = 0xffffb000
+	char.state = char.state.STANDING
+	char.groundspeed = 0
+	for (u8 i = 0; i < 60; ++i)
+	{
+		Test.frame(0, 0)
+		A0 = 0xffffb000
+		Test.expect(Test.followerX(0) <= s32(char.position.x.u16) - 18, "Tails must never pass the line position while stopping")
+		Test.expect(Test.followerX(1) <= s32(char.position.x.u16) - 36, "Knuckles must never pass the line position while stopping")
+	}
+	Test.expectEqual(Test.followerX(0), leaderX - 18, "Tails lined up after stopping")
+	Test.expectEqual(Test.followerX(1), leaderX - 36, "Knuckles lined up after stopping")
+	Test.expectEqual(Test.followerState(0), char.state.STANDING, "Tails standing in the line")
+
+	// --- Turning around while standing: they walk over to the other side ---
+	A0 = 0xffffb000
+	char.flags |= char.flag.FACING_LEFT
+	Test.frame(0, 0)
+	Test.expect(Test.followerX(0) > leaderX - 18 && Test.followerX(0) <= leaderX - 18 + 3, "Tails walks, doesn't teleport")
+	Test.expectEqual(Test.followerState(0), char.state.RUNNING, "Tails walking to the other side")
+	Test.frames(40, 0, 0)
+	Test.expectEqual(Test.followerX(0), leaderX + 18, "Tails lined up on the other side")
+	Test.expectEqual(Test.followerX(1), leaderX + 36, "Knuckles lined up on the other side")
+	A0 = 0xffffb000
+	char.flags &= ~char.flag.FACING_LEFT
+	Test.frames(40, 0, 0)
+
+	// --- Switching the leader with R: Sonic -> Tails ---
+	A0 = 0xffffb000
+	s32 yBefore = char.position.y.u16
+	Test.pressButton(BUTTON_R)
+	A0 = 0xffffb000
+	Test.expectEqual(char.character, CHARACTER_TAILS, "R should switch to Tails")
+	Test.expectEqual(char.update_address, Heroes.UPDATE_ADDRESS_TAILS, "Player 1 should run Tails' code")
+	Test.expectEqual(char.mapping_offset, 0x148eb8, "Tails' mappings")
+	Test.expectEqual(char.hitbox_extends.y, char.hitbox.y.UPRIGHT_TAILS, "Tails' hitbox height")
+	Test.expectEqual(char.position.y.u16, yBefore + 4, "Feet stay on the ground when switching to the smaller Tails")
+	Test.expectEqual(u32[0xffffcc0a], addressof(TailsTails.Init), "Tails' tails object spawned")
+	Test.expectEqual(u16[0xffffcc9e + 0x42], 0xb000, "Dust cloud for Tails refers to player 1")
+	Test.expectEqual(Heroes.wantedLeader, CHARACTER_TAILS + 1, "Chosen leader remembered")
+	Test.expectEqual(Test.followerCharacter(0), CHARACTER_KNUCKLES, "Knuckles follows Tails directly")
+	Test.expectEqual(Test.followerCharacter(1), CHARACTER_SONIC, "Sonic is last behind Tails")
+
+	// --- Cooldown: pressing again right away does nothing ---
+	Test.pressButton(BUTTON_R)
+	A0 = 0xffffb000
+	Test.expectEqual(char.character, CHARACTER_TAILS, "No second switch during cooldown")
+	Test.frames(20, 0, 0)
+
+	// --- Team flight: Knuckles and Sonic hang on to Tails ---
+	A0 = 0xffffb000
+	char.flags |= char.flag.IN_AIR
+	char.state = char.state.TAILS_FLYUP
+	char.double_jump_state = 1
+	Test.frames(20, 2, -1)
+	A0 = 0xffffb000
+	Test.expectEqual(Test.followerX(0), char.position.x.u16, "Knuckles hangs below Tails")
+	Test.expectEqual(Test.followerY(0), char.position.y.u16 + 0x1c, "Knuckles hangs below Tails (height)")
+	Test.expectEqual(Test.followerY(1), char.position.y.u16 + 0x1c + 0x22, "Sonic hangs on to Knuckles")
+	Test.expectEqual(Test.followerState(0), char.state.HANGING, "Knuckles' hanging state")
+	Test.expectEqual(Test.followerState(1), char.state.SONIC_HANGON, "Sonic's hanging state")
+
+	// --- Switching in mid-air with L: Tails flying -> Sonic curls up, ready for his own move ---
+	Test.pressButton(BUTTON_L)
+	A0 = 0xffffb000
+	Test.expectEqual(char.character, CHARACTER_SONIC, "L should switch back to Sonic")
+	Test.expectEqual(char.state, char.state.ROLLING, "Sonic curls up after Tails' flight")
+	Test.expect((char.flags & char.flag.ROLLING) != 0, "Rolling flag set")
+	Test.expectEqual(char.double_jump_state, 0, "Sonic can use his own ability")
+	Test.expectEqual(char.hitbox_extends.y, char.hitbox.y.ROLLING, "Rolling hitbox")
+	Test.expectEqual(u32[0xffffcc0a], 0, "Tails' tails removed")
+	Test.expectEqual(Heroes.airSwaps, 1, "One switch in the air")
+
+	// --- Air switch limit ---
+	Test.frames(13, 0, 1)
+	Test.pressButton(BUTTON_R)		// Second air switch: allowed
+	Test.frames(13, 0, 1)
+	A0 = 0xffffb000
+	u8 characterAfterTwo = char.character
+	Test.pressButton(BUTTON_R)		// Third one: blocked
+	A0 = 0xffffb000
+	Test.expectEqual(char.character, characterAfterTwo, "Only two switches per jump")
+
+	// --- Landing (the game resets the hitbox when landing) ---
+	A0 = 0xffffb000
+	char.hitbox_extends.y = char.hitbox.default.y
+	char.flags = 0
+	char.state = char.state.STANDING
+	char.double_jump_state = 0
+	Test.frames(20, 0, 0)
+	Test.expectEqual(Heroes.airSwaps, 0, "Air switch counter reset on landing")
+
+	// --- Big jump of the leader (act transition): followers come along ---
+	Test.frames(1, 0x2000, 0)
+	Test.frames(30, 0, 0)
+	A0 = 0xffffb000
+	Test.expect(abs(Test.followerX(0) - s32(char.position.x.u16)) <= 36, "Followers moved with the act transition")
+
+	// --- A real AI Tails appears (cutscene): no switching, no duplicate Tails ---
+	u32[0xffffb04a] = Heroes.UPDATE_ADDRESS_TAILS
+	A0 = 0xffffb000
+	u8 before = char.character
+	Test.pressButton(BUTTON_R)
+	A0 = 0xffffb000
+	Test.expectEqual(char.character, before, "No switching while the game uses its own Tails")
+	u32[0xffffb04a] = 0
+	Test.frames(20, 0, 0)
+
+	// --- Rendering: followers on screen with their own palettes, behind the leader ---
+	A0 = 0xffffb000
+	camera.foreground.x.u16 = char.position.x.u16 - 0xa0
+	camera.foreground.y.u16 = char.position.y.u16 - 0x70
+	Sim.log("leader character", char.character)
+	Sim.log("leader x", char.position.x.u16)
+	Sim.log("follower 0 visible", u8[Test.follower(0) + 0x4a])
+	Sim.log("follower 0 x", Test.followerX(0))
+	Sim.log("follower 1 x", Test.followerX(1))
+	Sim.log("leader base state", char.base_state)
+	Sim.setLogDraws(true)
+	Heroes.renderFollowers()
+	Heroes.renderTeamHud()
+	Sim.setLogDraws(false)
+
+	// --- Switching Tails -> Knuckles on the ground: the taller Knuckles stands on the same floor ---
+	A0 = 0xffffb000
+	if (char.character != CHARACTER_TAILS)
+	{
+		Heroes.setLeaderCharacter(CHARACTER_TAILS)
+	}
+	Test.frames(20, 0, 0)
+	A0 = 0xffffb000
+	yBefore = char.position.y.u16
+	Test.pressButton(BUTTON_R)
+	A0 = 0xffffb000
+	Test.expectEqual(char.character, CHARACTER_KNUCKLES, "Tails -> Knuckles")
+	Test.expectEqual(char.update_address, Heroes.UPDATE_ADDRESS_KNUCKLES, "Player 1 runs Knuckles' code")
+	Test.expectEqual(char.position.y.u16, yBefore - 4, "Knuckles is 4 pixels taller than Tails")
+	Test.expectEqual(char.hitbox.default.y, char.hitbox.y.UPRIGHT, "Knuckles' default hitbox")
+	Test.expectEqual(Test.followerCharacter(0), CHARACTER_SONIC, "Sonic follows Knuckles directly")
+	Test.expectEqual(Test.followerCharacter(1), CHARACTER_TAILS, "Tails is last behind Knuckles")
+	Test.frames(20, 0, 0)
+
+	// --- Tails as leader can fly, even though Sonic is the story character ---
+	A0 = 0xffffb000
+	Heroes.setLeaderCharacter(CHARACTER_TAILS)
+	char.flags = char.flag.IN_AIR | char.flag.ROLLING
+	char.state = char.state.ROLLING
+	char.hitbox_extends.y = char.hitbox.y.ROLLING
+	char.double_jump_state = 0
+	TailsPressedJumpInMidAir()
+	A0 = 0xffffb000
+	Test.expectEqual(char.double_jump_state, 1, "Tails started flying")
+	Test.expect((char.flags & char.flag.ROLLING) == 0, "No longer rolling while flying")
+
+	// --- Tails as leader dying costs a life like for any player 1, instead of respawning like the AI sidekick ---
+	A0 = 0xffffb000
+	char.flags = char.flag.IN_AIR
+	char.base_state = base_state.DIED
+	camera.position.y.u16 = 0x0100
+	char.position.y.u16 = 0x0400
+	lives_counter = 3
+	Character.CheckDiedStateEnd()
+	A0 = 0xffffb000
+	Test.expectEqual(char.base_state, base_state.INACTIVE, "Tails leader death ends like player 1 death")
+	Test.expectEqual(lives_counter, 2, "A life got lost")
+
+	// --- Stack must be balanced after all those pushAll / popAll ---
+	Test.expectEqual(Sim.getStackSize(), 0, "Register stack balanced")
+
+	// --- Character selection: Sonic & Tails becomes Sonic alone, as the team has its own Tails ---
+	levelselect.characters = CHARS_SONIC_AND_TAILS
+	global.game_mode = 0x0c
+	SetGlobalCharacters()
+	Test.expectEqual(global.characters, CHARS_SONIC_ALONE, "Sonic & Tails is played as Sonic alone with the team")
+
+	Sim.log("ALL TESTS PASSED", 1)
+}

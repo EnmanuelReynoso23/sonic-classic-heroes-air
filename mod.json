@@ -1,33 +1,98 @@
 {
-  "Metadata": {
-    "Name": "Sonic Classic Heroes AIR",
-    "Author": "Enmanuel & Antigravity (Inspirado en Flamewing y ColinC10)",
-    "Description": "Combina la experiencia de Sonic Classic Heroes con Sonic 3 & Knuckles: Juega con 3 personajes simultáneos (Team Sonic y Team Chaotix), cambio de líder en tiempo real (Velocidad, Vuelo, Fuerza) y soporte de niveles.",
-    "Version": "1.0.0",
-    "ModVersion": "1.0",
-    "TargetAppVersion": "24.02.0",
-    "Compatibility": "Sonic3AIR",
-    "URL": "https://github.com/EnmanuelReynoso23/sonic-classic-heroes-air"
-  },
-  "Config": {
-    "LeaderSwapKey": {
-      "Name": "Botón de Intercambio",
-      "Type": "string",
-      "Values": ["Y / Triángulo (Recomendado)", "X / Cuadrado", "Gatillo Superior"],
-      "Default": "Y / Triángulo (Recomendado)"
-    },
-    "DefaultTeam": {
-      "Name": "Equipo Predeterminado",
-      "Type": "string",
-      "Values": ["Team Sonic (Sonic, Tails, Knuckles)", "Team Chaotix (Espio, Charmy, Vector)"],
-      "Default": "Team Sonic (Sonic, Tails, Knuckles)"
-    },
-    "FollowDistance": {
-      "Name": "Distancia de Formación",
-      "Type": "integer",
-      "Min": 16,
-      "Max": 64,
-      "Default": 28
-    }
-  }
+	"Metadata":
+	{
+		"Name": "Sonic Classic Heroes AIR",
+		"UniqueID": "enmanuel-sonic-classic-heroes-air",
+		"Author": "Enmanuel Reynoso",
+		"Description": "Sonic, Tails y Knuckles juegan juntos Sonic 3 & Knuckles, como en Sonic Classic Heroes. Cambia de lider en cualquier momento (Speed -> Fly -> Power) con R / L o Y.",
+		"URL": "https://github.com/EnmanuelReynoso23/sonic-classic-heroes-air",
+		"ModVersion": "2.0.0.0",
+		"GameVersion": "26.03.28.0"
+	},
+
+	"UsesFeatures":
+	{
+		"Controls_LR": true
+	},
+
+	"Settings":
+	{
+		"List":
+		[
+			{
+				"InternalName": "HeroesEnabled",
+				"DisplayName": "Modo Classic Heroes",
+				"Category": "Classic Heroes",
+				"Variable": "Heroes.option.enabled",
+				"DefaultValue": "1",
+				"Options":
+				{
+					"0": "Desactivado",
+					"1": "Activado"
+				}
+			},
+			{
+				"InternalName": "HeroesSwapButton",
+				"DisplayName": "Cambiar de lider",
+				"Category": "Classic Heroes",
+				"Variable": "Heroes.option.swapButton",
+				"DefaultValue": "0",
+				"Options":
+				{
+					"0": "R / L, y Y en el suelo",
+					"1": "Solo R / L",
+					"2": "R / L, y Y tambien en el aire"
+				}
+			},
+			{
+				"InternalName": "HeroesSpacing",
+				"DisplayName": "Distancia del equipo",
+				"Category": "Classic Heroes",
+				"Variable": "Heroes.option.spacing",
+				"DefaultValue": "8",
+				"Options":
+				{
+					"5": "Muy cerca",
+					"8": "Normal",
+					"12": "Lejos"
+				}
+			},
+			{
+				"InternalName": "HeroesTeamFlight",
+				"DisplayName": "Vuelo en equipo",
+				"Category": "Classic Heroes",
+				"Variable": "Heroes.option.teamFlight",
+				"DefaultValue": "1",
+				"Options":
+				{
+					"0": "Desactivado",
+					"1": "Activado"
+				}
+			},
+			{
+				"InternalName": "HeroesKeepLeader",
+				"DisplayName": "Recordar el lider",
+				"Category": "Classic Heroes",
+				"Variable": "Heroes.option.keepLeader",
+				"DefaultValue": "1",
+				"Options":
+				{
+					"0": "No, empezar con el de la historia",
+					"1": "Si, tambien entre zonas"
+				}
+			},
+			{
+				"InternalName": "HeroesHud",
+				"DisplayName": "Indicador del equipo",
+				"Category": "Classic Heroes",
+				"Variable": "Heroes.option.showHud",
+				"DefaultValue": "1",
+				"Options":
+				{
+					"0": "Oculto",
+					"1": "Visible"
+				}
+			}
+		]
+	}
 }

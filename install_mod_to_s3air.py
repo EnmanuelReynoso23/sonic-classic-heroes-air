@@ -79,9 +79,10 @@ def main():
         print("✅ ¡Archivos del mod copiados con éxito a la carpeta de mods!")
 
     print("\n🎮 ¡Listo! Ahora cuando abras Sonic 3 A.I.R.:")
-    print("   1. Ve a 'Options' -> 'Mods'")
+    print("   1. Ve al menú principal -> 'Mods'")
     print("   2. Activa 'Sonic Classic Heroes AIR'")
-    print("   3. ¡Inicia cualquier partida y disfruta del trío en acción!")
+    print("   3. Opciones del mod: Options -> pestaña 'Mods' -> 'Classic Heroes'")
+    print("   4. Inicia una partida y cambia de líder con R / L (o Y en el suelo)")
     print("=" * 65)
     return 0
 

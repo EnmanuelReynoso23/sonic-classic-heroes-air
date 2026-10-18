@@ -1,0 +1,64 @@
+//# script-feature-level(2)
+
+//-------------------------------------------------------//
+// Team display                                          //
+//-------------------------------------------------------//
+
+constant string Heroes.HUD_FONT = "sonic3_fontB:gradient:outline(0x000000ff,1,false):shadow(1,1,0.5f,0.8f)"
+
+
+function string Heroes.getCharacterName(u8 character)
+{
+	return (character == CHARACTER_SONIC) ? "SONIC" : (character == CHARACTER_TAILS) ? "TAILS" : "KNUCKLES"
+}
+
+function string Heroes.getFormationName(u8 character)
+{
+	return (character == CHARACTER_SONIC) ? "SPEED" : (character == CHARACTER_TAILS) ? "FLY" : "POWER"
+}
+
+function u32 Heroes.getFormationColor(u8 character)
+{
+	// RGBA
+	return (character == CHARACTER_SONIC) ? 0x70a8ffff : (character == CHARACTER_TAILS) ? 0xffd040ff : 0xff6850ff
+}
+
+
+// Draws the three team members below the rings counter, with the current leader highlighted
+function void Heroes.renderTeamHud()
+{
+	if (Heroes.option.showHud == 0 || global.level_started == 0)
+		return
+	if (global.zone >= 0x13 && global.zone <= 0x15)		// No room for it in bonus stages
+		return
+
+	u8 leader = u8[0xffffb000 + 0x38]
+
+	// Same horizontal position as the score / time / rings display, including its slide-in
+	s32 px = s32(global.level_started) + 0x0f
+	s32 py = 0x39
+	u16 renderQueue = 0xe100
+
+	// Team members in team order, the leader in its formation color
+	for (u8 character = 0; character < Heroes.TEAM_SIZE; ++character)
+	{
+		string name = Heroes.getCharacterName(character)
+		u32 color = (character == leader) ? Heroes.getFormationColor(leader) : 0xa0a0a0a0
+		Renderer.drawText(Heroes.HUD_FONT, px, py, name, color, 1, 0, renderQueue, false)
+		px += Renderer.getTextWidth(Heroes.HUD_FONT, name) + 6
+	}
+
+	// Current formation
+	Renderer.drawText(Heroes.HUD_FONT, s32(global.level_started) + 0x0f, py + 11, stringformat("%s FORMATION", Heroes.getFormationName(leader)), 0xffffffc0, 1, 0, renderQueue, false)
+}
+
+
+// The lives display shows the current leader instead of the story character
+function string getCharacterLivesIcon(u8 character)
+{
+	if (Heroes.isActive() && character == getMainCharacter())
+	{
+		character = u8[0xffffb000 + 0x38]
+	}
+	return base.getCharacterLivesIcon(character)
+}
