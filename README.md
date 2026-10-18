@@ -18,12 +18,9 @@ Mod para **Sonic 3 A.I.R.** que continúa la historia de *Sonic Classic Heroes* 
 
 1. Instala Sonic 3 A.I.R. desde [sonic3air.org](https://sonic3air.org) o la [página de releases](https://github.com/Eukaryot/sonic3air/releases).
    - Necesitas **tu propia ROM** de *Sonic 3 & Knuckles*: la de Steam (`Sonic_Knuckles_wSonic3.bin`) o el cartucho combinado *Sonic & Knuckles + Sonic The Hedgehog 3* (4 MB). Si el juego no la encuentra solo, cópiala como `%APPDATA%\Sonic3AIR\Sonic_Knuckles_wSonic3.bin`.
-2. Copia esta carpeta en `%APPDATA%\Sonic3AIR\mods\`, o ejecuta:
-   ```
-   python install_mod_to_s3air.py
-   ```
-   Así se crea un enlace a esta carpeta y los cambios se ven al instante.
-   `python download_and_launch_s3air.py` además descarga el juego si no lo tienes y lo abre.
+2. Descarga `sonic-classic-heroes-air-<versión>.zip` de [Releases](../../releases) y descomprímelo en `%APPDATA%\Sonic3AIR\mods\`. Debe quedar la carpeta `mods\sonic-classic-heroes-air\` con `mod.json` dentro.
+   - En Android o en la versión web, usa *Options → System → File Browser → Import file...* con el zip.
+   - Si trabajas con el código, `python install_mod_to_s3air.py` enlaza esta carpeta del repositorio con la de mods, y los cambios se ven al reiniciar el nivel. `python download_and_launch_s3air.py` además descarga el juego si no lo tienes y lo abre.
 3. En el juego: **menú principal → Mods**, y activa *Sonic Classic Heroes AIR*.
 4. Empieza una partida con cualquier personaje. Si eliges *Sonic & Tails*, se juega como Sonic solo, porque el equipo ya trae a su propio Tails.
 
@@ -61,7 +58,9 @@ En *Options → Mods → Classic Heroes*:
 
 ## Pruebas
 
-Sin ROM el juego no carga scripts, así que `tools/lemoncheck` compila los scripts originales del juego más el mod con el mismo compilador de Lemon Script de la versión v26.03.28. Además puede ejecutar el mod con la memoria simulada.
+El mod se probó en Sonic 3 A.I.R. v26.03.28 (Angel Island: fila, cambio de líder, vuelo en equipo y planeo de Knuckles).
+
+Además, sin ROM el juego no carga scripts, así que `tools/lemoncheck` compila los scripts originales del juego más el mod con el mismo compilador de Lemon Script de la versión v26.03.28. Además puede ejecutar el mod con la memoria simulada.
 
 ```
 tools/lemoncheck.sh check   # compila (Linux o WSL: necesita g++, cmake y zlib)
@@ -94,3 +93,9 @@ Las pruebas comprueban varias cosas, fotograma a fotograma:
 - *Sonic Classic Heroes*: Flamewing y ColinC10.
 - *Sonic 3 A.I.R.* y el Oxygen Engine: Eukaryot ([GPLv3](https://github.com/Eukaryot/sonic3air)).
 - *Sonic the Hedgehog* © SEGA. Este mod no incluye la ROM ni datos del juego.
+
+## Licencia
+
+[GPLv3](LICENSE), igual que los scripts de Sonic 3 A.I.R. que el mod extiende.
+
+Para generar el zip de una versión: `python tools/package_mod.py` (queda en `dist/`).
