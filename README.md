@@ -17,7 +17,7 @@ Mod para **Sonic 3 A.I.R.** que continúa la historia de *Sonic Classic Heroes* 
 ## Instalación
 
 1. Instala Sonic 3 A.I.R. desde [sonic3air.org](https://sonic3air.org) o la [página de releases](https://github.com/Eukaryot/sonic3air/releases).
-   - Necesitas **tu propia ROM** de *Sonic 3 & Knuckles* (`Sonic_Knuckles_wSonic3.bin`, por ejemplo la de Steam). El juego la pide al abrirlo por primera vez.
+   - Necesitas **tu propia ROM** de *Sonic 3 & Knuckles*: la de Steam (`Sonic_Knuckles_wSonic3.bin`) o el cartucho combinado *Sonic & Knuckles + Sonic The Hedgehog 3* (4 MB). Si el juego no la encuentra solo, cópiala como `%APPDATA%\Sonic3AIR\Sonic_Knuckles_wSonic3.bin`.
 2. Copia esta carpeta en `%APPDATA%\Sonic3AIR\mods\`, o ejecuta:
    ```
    python install_mod_to_s3air.py

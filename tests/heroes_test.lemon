@@ -117,6 +117,16 @@ function void Test.pressButton(u8 button)
 
 function void Test.run()
 {
+	// --- The game reaches the mod through Sonic's update address, like the object loop does ---
+	Test.setupLevel()
+	Heroes.lastUpdateFrame = 0
+	level.framecounter = 0x1234
+	A0 = 0xffffb000
+	A1 = Heroes.UPDATE_ADDRESS_SONIC
+	call A1
+	Test.expectEqual(Heroes.lastUpdateFrame, 0x1234, "Character.BaseUpdate.Sonic override must be reached via its address hook")
+	Test.expect(Heroes.trailValid, "Trail initialized through the address hook")
+
 	// --- Standing at level start: the team lines up behind Sonic ---
 	Test.setupLevel()
 	Test.frames(40, 0, 0)

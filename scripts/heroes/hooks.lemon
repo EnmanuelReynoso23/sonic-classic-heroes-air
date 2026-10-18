@@ -4,7 +4,12 @@
 // Overrides of base game functions                      //
 //-------------------------------------------------------//
 
+// Note: In S3AIR v26.03.28, address hooks and update hooks are bound to the function that has the
+// "//# address-hook" or "//# post-update-hook" pragma, not to the latest override.
+// That's why overrides of functions the game calls via their address have to repeat the pragma.
+
 // Character selection at level start
+//# address-hook(0x0067b6) end(0x0067ec)
 function void SetGlobalCharacters()
 {
 	base.SetGlobalCharacters()
@@ -20,6 +25,7 @@ function void SetGlobalCharacters()
 
 
 // Spawning of the characters when a level starts or restarts
+//# address-hook(0x006a76) end(0x006bd6)
 function void InitializeGameCharacters()
 {
 	base.InitializeGameCharacters()
@@ -28,18 +34,21 @@ function void InitializeGameCharacters()
 
 
 // Player 1 update for each of the three characters
+//# address-hook(0x010a94) end(0x010ae8)
 function void Character.BaseUpdate.Sonic()
 {
 	base.Character.BaseUpdate.Sonic()
 	Heroes.afterCharacterUpdate()
 }
 
+//# address-hook(0x01365c) end(0x0136b8)
 function void Character.BaseUpdate.Tails()
 {
 	base.Character.BaseUpdate.Tails()
 	Heroes.afterCharacterUpdate()
 }
 
+//# address-hook(0x016444) end(0x016498)
 function void Character.BaseUpdate.Knuckles()
 {
 	base.Character.BaseUpdate.Knuckles()
@@ -91,6 +100,7 @@ function void Heroes.syncCameraOffset()
 
 
 // Sprite rendering, once per frame
+//# address-hook(0x01ad20) end(0x01af68)
 function void RenderSprites()
 {
 	base.RenderSprites()
@@ -123,6 +133,7 @@ function void TailsPressedJumpInMidAir()
 
 
 // When Tails as team leader dies, it must be handled like player 1 dying, not like the AI sidekick that just respawns
+//# address-hook(0x0123c2) end(0x01257a)
 function void Character.CheckDiedStateEnd()
 {
 	if (A0 == 0xffffb000 && char.character == CHARACTER_TAILS && !isMainCharacter(CHARACTER_TAILS) && Heroes.option.enabled && competition_mode.active == 0)

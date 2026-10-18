@@ -250,19 +250,15 @@ static int runSimulation(const std::vector<const Module*>& modules, const std::s
 	for (const Module* module : modules)
 		program.addModule(*module);
 
-	// Address hooks, resolved to the deepest override of each hooked function
+	// Address hooks, bound like S3AIR v26.03.28 does it ("LemonScriptProgram::collectHooksFromFunctions"):
+	//  -> Each hook goes to the function that has the address-hook pragma, later modules overwrite earlier ones
+	//  -> An override without the pragma does NOT get called via its address (newer engine versions changed that)
 	std::map<uint32, const Function*> hooks;
 	for (const ScriptFunction* function : program.getScriptFunctions())
 	{
 		for (const ScriptFunction::AddressHook& addressHook : function->getAddressHooks())
 		{
-			const Function* target = function;
-			for (const Function* candidate : program.getFunctionsByName(function->getName().getHash()))
-			{
-				if (candidate->getSignatureHash() == function->getSignatureHash())
-					target = candidate;
-			}
-			hooks[addressHook.mAddress] = target;
+			hooks[addressHook.mAddress] = function;
 		}
 	}
 
