@@ -1,0 +1,33 @@
+{
+  "Metadata": {
+    "Name": "Sonic Classic Heroes AIR",
+    "Author": "Enmanuel & Antigravity (Inspirado en Flamewing y ColinC10)",
+    "Description": "Combina la experiencia de Sonic Classic Heroes con Sonic 3 & Knuckles: Juega con 3 personajes simultáneos (Team Sonic y Team Chaotix), cambio de líder en tiempo real (Velocidad, Vuelo, Fuerza) y soporte de niveles.",
+    "Version": "1.0.0",
+    "ModVersion": "1.0",
+    "TargetAppVersion": "24.02.0",
+    "Compatibility": "Sonic3AIR",
+    "URL": "https://github.com/EnmanuelReynoso23/sonic-classic-heroes-air"
+  },
+  "Config": {
+    "LeaderSwapKey": {
+      "Name": "Botón de Intercambio",
+      "Type": "string",
+      "Values": ["Y / Triángulo (Recomendado)", "X / Cuadrado", "Gatillo Superior"],
+      "Default": "Y / Triángulo (Recomendado)"
+    },
+    "DefaultTeam": {
+      "Name": "Equipo Predeterminado",
+      "Type": "string",
+      "Values": ["Team Sonic (Sonic, Tails, Knuckles)", "Team Chaotix (Espio, Charmy, Vector)"],
+      "Default": "Team Sonic (Sonic, Tails, Knuckles)"
+    },
+    "FollowDistance": {
+      "Name": "Distancia de Formación",
+      "Type": "integer",
+      "Min": 16,
+      "Max": 64,
+      "Default": 28
+    }
+  }
+}
