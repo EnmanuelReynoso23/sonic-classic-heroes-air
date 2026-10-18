@@ -1,0 +1,60 @@
+// ==============================================================================
+// 💍 Sonic Classic Heroes AIR - Sistema de Anillos, Daño y Vidas Compartidas
+// ==============================================================================
+// Reglas de juego de Classic Heroes:
+// 1. Contador de anillos unificado para el equipo.
+// 2. Si un acompañante (IA) recibe daño, NO pierde los anillos del equipo.
+//    Solo parpadea con inmunidad temporal.
+// 3. Si un acompañante muere, reaparece volando desde arriba sin restar vidas.
+// ==============================================================================
+
+// Hook a la rutina de recibir daño de los personajes
+function bool Heroes.HandleFollowerDamage(u32 character_addr)
+{
+    // Determinar si el personaje que recibió el golpe es el líder activo
+    bool is_leader = false
+    if (heroes.current_leader == HERO_SPEED && character_addr == 0xffffb000)
+        is_leader = true
+    else if (heroes.current_leader == HERO_FLY && character_addr == 0xffffb04a)
+        is_leader = true
+    else if (heroes.current_leader == HERO_POWER && character_addr == heroes.char3_slot)
+        is_leader = true
+
+    // Si es el líder, sufre el daño normal del juego (pierde anillos)
+    if (is_leader)
+        return false // Continuar con la rutina estándar de daño
+
+    // Si es un acompañante de la IA:
+    // 1. No soltar anillos del equipo
+    // 2. Otorgar 120 fotogramas de invencibilidad (parpadeo)
+    u8[character_addr + 0x30] = 120 // Timer de invencibilidad
+    u8[character_addr + 0x22] |= 0x02 // Despegar del suelo
+
+    // Pequeño retroceso hacia atrás
+    bool facing_left = (u8[character_addr + 0x2a] & 0x01) != 0
+    s16[character_addr + 0x18] = facing_left ? 0x200 : -0x200
+    s16[character_addr + 0x1a] = -0x400
+
+    playSound(0xb7) // Sonido de impacto sin pérdida de anillos
+    return true // Indicar que el daño fue interceptado
+}
+
+// Hook de recolección de anillos para sincronizar
+function void Heroes.CollectRingBonus()
+{
+    // Incrementar contador global de anillos
+    if (ring_counter < 999)
+    {
+        ring_counter++
+    }
+
+    // Comprobar vida extra cada 100 anillos
+    if (ring_counter % 100 == 0)
+    {
+        if (lives_counter < 99)
+        {
+            lives_counter++
+            playMusic(0x9f) // Música de 1-UP
+        }
+    }
+}

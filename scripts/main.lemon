@@ -43,4 +43,19 @@ function void LevelSetup.InitializeCharacters()
 {
     base.LevelSetup.InitializeCharacters()
     Heroes.InitTeam()
+    Heroes.SpawnThirdCharacter()
 }
+
+// Hook al bucle de actualización de físicas y personajes por fotograma
+//# address-hook(0x010a00) end(0x010b20)
+function void Character.BaseUpdate()
+{
+    base.Character.BaseUpdate()
+
+    // Solo ejecutar en el objeto principal (Player 1) para no triplicar llamadas
+    if (A0 == 0xffffb000)
+    {
+        Heroes.UpdateTeamMechanics()
+    }
+}
+
